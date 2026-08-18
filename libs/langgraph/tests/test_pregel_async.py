@@ -569,10 +569,14 @@ async def test_cancellation_recorded_for_all_durability_modes(
     class State(TypedDict):
         steps: Annotated[list[str], operator.add]
 
+    ran: list[str] = []
+
     async def fast(state: State) -> Any:
+        ran.append("fast")
         return {"steps": ["fast"]}
 
     async def slow(state: State) -> Any:
+        ran.append("slow")
         await asyncio.sleep(5)
         return {"steps": ["slow"]}
 
@@ -611,6 +615,14 @@ async def test_cancellation_recorded_for_all_durability_modes(
     assert errors.get("fast") is None
     # and its committed work survives
     assert state.values["steps"] == ["fast"]
+
+    # The durable cancellation marker has to translate into behaviour: a resume
+    # re-runs only the cancelled node, so the completed node's work is not paid
+    # for twice. This is the clause that would regress silently if pending-write
+    # replay ever changed.
+    ran.clear()
+    await graph.ainvoke(None, config)
+    assert ran == ["slow"]
 
 
 async def test_node_cancellation_on_other_node_exception() -> None:
